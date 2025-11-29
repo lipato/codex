@@ -1,4 +1,3 @@
-// Example declarative pipeline for deploying maxbot using the shared Groovy script
 pipeline {
     agent any
 
@@ -11,10 +10,17 @@ pipeline {
     }
 
     stages {
-        stage('Deploy') {
+        stage('Load deploy script') {
             steps {
                 script {
-                    def deploy = load('jenkins/projects/maxbot/scripts/deploy.groovy')
+                    deploy = load('jenkins/projects/maxbot/scripts/deploy.groovy')
+                }
+            }
+        }
+
+        stage('Deploy maxbot') {
+            steps {
+                script {
                     deploy.deploy(
                         gitRepo: params.GIT_REPO,
                         gitBranch: params.GIT_BRANCH,

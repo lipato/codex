@@ -1,24 +1,34 @@
-# Maxbot Jenkins Jobs
+# Maxbot Jenkins Deployment
 
-This document describes the Jenkins jobs used to build and deploy Maxbot.
+Этот каталог содержит скрипты и конфигурацию для деплоя приложения **spsmaxbot** через Jenkins.
 
-## Job parameters
-- **GIT_BRANCH**: Git branch or tag to check out (e.g., `main`, `release/*`).
-- **ENVIRONMENT**: Target environment (e.g., `dev`, `stage`, `prod`).
-- **DEPLOY_VERSION**: Version or image tag to promote. Defaults to the latest artifact built from `GIT_BRANCH` if empty.
-- **DRY_RUN**: When `true`, renders the pipeline steps without executing changes.
-- **EXTRA_CONFIG**: Optional path in `jenkins/projects/maxbot/config/` with environment-specific overrides.
+## Параметры pipeline
+- **GIT_REPO** – URL Git-репозитория (ssh/https) с кодом `spsmaxbot`.
+- **GIT_BRANCH** – ветка для деплоя.
+- **TARGET_HOST** – хост/VM, где развёрнут сервис `maxbot`.
+- **SSH_CREDENTIALS_ID** – Jenkins credentials (SSH key) для Git и SSH.
+- **SSH_USER** – SSH-пользователь (по умолчанию `jenkins`).
 
-## Required credentials
-- **maxbot-repo-ssh-key** (SSH key): Access to clone the private repository.
-- **maxbot-container-registry** (username/password or token): Push/pull container images.
-- **maxbot-kubeconfig** (secret file): Kubeconfig with access to target namespaces.
-- **slack-notifications** (token): Posting build and deploy status notifications.
+## Поток деплоя
+1. Checkout указанной ветки из репозитория.
+2. Подключение к `TARGET_HOST` по SSH под пользователем `SSH_USER` (через `sshagent`).
+3. Остановка сервиса `systemctl stop maxbot` (если запущен).
+4. Бэкап каталога `/opt/data/maxbot` → `/opt/data/maxbot_bak_<timestamp>`.
+5. Создание чистого каталога `/opt/data/maxbot` и выдача прав `SSH_USER:SSH_USER`.
+6. Инициализация git, fetch указанной ветки и reset на `origin/<branch>`.
+7. **npm install / npm run build** выполняются пользователем `SSH_USER` (jenkins).
+8. После сборки права меняются на `maxbot:maxbot` (`chown -R`).
+9. Запуск и проверка `systemctl status maxbot`.
+10. Healthcheck `curl http://localhost:3000/health` и проверка `"status":"ok"`.
 
-## Deploy steps
-1. Checkout code from `GIT_BRANCH` using `maxbot-repo-ssh-key`.
-2. Build and publish the container image, tagging it with `DEPLOY_VERSION` via `maxbot-container-registry`.
-3. Load pipeline shared libraries from `jenkins/shared` and job-specific scripts from `jenkins/projects/maxbot/scripts`.
-4. Apply environment overrides from `jenkins/projects/maxbot/config/` (and optional `EXTRA_CONFIG`).
-5. Deploy manifests/Helm chart to the selected `ENVIRONMENT` cluster using `maxbot-kubeconfig`.
-6. Run post-deploy checks and announce results through `slack-notifications`.
+## Требования
+- На целевой VM установлены `git`, `node`, `npm`, `systemd` сервис `maxbot`.
+- Jenkins user имеет доступ по SSH и sudo на команды `systemctl`, `mv`, `chown`, `mkdir`.
+- В `SSH_CREDENTIALS_ID` хранится ключ, подходящий и для Git (если используется SSH-URL), и для подключения к `TARGET_HOST`.
+
+## Откат
+- Текущий релиз сохраняется в `/opt/data/maxbot_bak_<timestamp>`. Для отката:
+  - остановить сервис `maxbot`;
+  - удалить текущий `/opt/data/maxbot`;
+  - вернуть бэкап `mv /opt/data/maxbot_bak_<timestamp> /opt/data/maxbot`;
+  - запустить сервис.
